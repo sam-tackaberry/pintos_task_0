@@ -8,6 +8,10 @@
 /* Number of timer interrupts per second. */
 #define TIMER_FREQ 100
 
+
+/* Structure used to contain information about the threads to be slept. Holds the thread's list_elem, time to be woken
+ * back up and a semaphore.
+ * */
 struct blocked_thread {
     struct list_elem thread_elem;
     int64_t wake_up_time;
@@ -36,5 +40,6 @@ void timer_ndelay (int64_t nanoseconds);
 void timer_print_stats (void);
 
 void wake_thread(void);
+bool compare_wake_up(const struct list_elem *elem_add, const struct list_elem *e, void *aux);
 
 #endif /* devices/timer.h */

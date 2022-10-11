@@ -27,7 +27,7 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
-/* List of blocked thread structures containing the blocked thead, the wake up time and a semaphore */
+/* List of blocked thread structures containing the list_elem of all blocked threads */
 struct list blocked_list;
 
 static intr_handler_func timer_interrupt;
@@ -39,8 +39,6 @@ static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
 
 static void real_time_delay(int64_t num, int32_t denom);
-
-bool compare_wake_up(const struct list_elem *elem_add, const struct list_elem *e, void *aux);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -96,32 +94,43 @@ timer_elapsed(int64_t then) {
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
+
+/* New blocked thread structure is defined for the current thread and the wake_up_time recorded and the semaphore
+ * initialised. The list_elem is then added to the blocked_list and sema_down called preventing access to the thread.
+ */
 void
 timer_sleep(int64_t ticks) {
     int64_t start = timer_ticks();
     ASSERT(intr_get_level() == INTR_ON);
-        struct blocked_thread current_thread;
-        current_thread.wake_up_time = start + ticks;
-        sema_init(&current_thread.sema, 0);
-        list_insert_ordered(&blocked_list, &current_thread.thread_elem, compare_wake_up, NULL);
-        sema_down(&current_thread.sema);
+    struct blocked_thread current_thread;
+    current_thread.wake_up_time = start + ticks;
+    sema_init(&current_thread.sema, 0);
+    enum intr_level prev_level = intr_disable();
+    list_insert_ordered(&blocked_list, &current_thread.thread_elem, compare_wake_up, NULL);
+    intr_set_level(prev_level);
+    sema_down(&current_thread.sema);
 }
 
+// Comparison function for list_insert_ordered that compares the wake_up_time of two threads.
 bool compare_wake_up(const struct list_elem *elem_add, const struct list_elem *e, void *aux) {
-    struct blocked_thread *thread_add = list_entry(elem_add, struct blocked_thread, thread_elem);
-    struct blocked_thread *thread_compare = list_entry(e, struct blocked_thread, thread_elem);
+    struct blocked_thread *thread_add = list_entry(elem_add,
+    struct blocked_thread, thread_elem);
+    struct blocked_thread *thread_compare = list_entry(e,
+    struct blocked_thread, thread_elem);
     return (thread_add->wake_up_time < thread_compare->wake_up_time);
 }
 
+/* Called by the timer interrupt handler and checks if any of the threads within the list have passed their elapsed
+ * sleep time and need to be woken.
+ */
 void wake_thread(void) {
     while (!list_empty(&blocked_list)) {
-        struct blocked_thread *thread_front = list_entry(list_front(&blocked_list), struct blocked_thread,thread_elem);
+        struct blocked_thread *thread_front = list_entry(list_front(&blocked_list),
+        struct blocked_thread,thread_elem);
         if (thread_front->wake_up_time > timer_ticks())
             break;
         else {
-            enum intr_level old = intr_disable();
             list_remove(list_front(&blocked_list));
-            intr_set_level(old);
             sema_up(&thread_front->sema);
         }
     }
